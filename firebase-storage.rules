@@ -1,0 +1,90 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Helper functions for authentication and authorization
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    function isValidFileSize(maxSizeInMB) {
+      return request.resource.size < maxSizeInMB * 1024 * 1024;
+    }
+    
+    function isValidFileType(allowedTypes) {
+      return request.resource.contentType in allowedTypes;
+    }
+    
+    function hasValidMetadata() {
+      return request.resource.metadata != null &&
+             'uploadedBy' in request.resource.metadata &&
+             'groupId' in request.resource.metadata;
+    }
+
+    // Public assets (logos, avatars, etc.)
+    match /public/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAuthenticated() && 
+                      isValidFileSize(5) && // 5MB limit for public assets
+                      isValidFileType(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+    }
+
+    // User profile assets
+    match /users/{userId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && 
+                      isOwner(userId) &&
+                      isValidFileSize(10) && // 10MB limit for user files
+                      hasValidMetadata();
+    }
+
+    // Group documents and files
+    match /groups/{groupId}/documents/{documentId}/{allPaths=**} {
+      allow read: if isAuthenticated() && 
+                     // Check if user is member of the group (you'll need to implement this check)
+                     true; // Placeholder - implement group membership check
+      
+      allow write: if isAuthenticated() && 
+                      isValidFileSize(100) && // 100MB limit for documents
+                      hasValidMetadata() &&
+                      // Check if user has write permissions to the group
+                      true; // Placeholder - implement group permission check
+      
+      allow delete: if isAuthenticated() && 
+                       // Only allow deletion by document owner or group admin
+                       (resource.metadata.uploadedBy == request.auth.uid ||
+                        true); // Placeholder - implement admin check
+    }
+
+    // Collaborative document content (Yjs documents)
+    match /documents/{documentId}/content.yjs {
+      allow read, write: if isAuthenticated() &&
+                            // Check if user is collaborator on the document
+                            true; // Placeholder - implement collaborator check
+    }
+
+    // Temporary uploads (auto-delete after 24 hours)
+    match /temp/{userId}/{allPaths=**} {
+      allow read, write: if isAuthenticated() && 
+                            isOwner(userId) &&
+                            isValidFileSize(50); // 50MB limit for temp files
+    }
+
+    // Legacy uploads (for backward compatibility)
+    match /uploads/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && 
+                      isValidFileSize(50) &&
+                      hasValidMetadata();
+    }
+
+    // Deny all other access
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
